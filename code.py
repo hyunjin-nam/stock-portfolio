@@ -31,55 +31,112 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import matplotlib.dates as mdates
 import datetime
+from datetime import datetime as dt
 
 # To make candlestick charts
 from mplfinance.original_flavor import candlestick_ohlc
-
-# For reading files
-from os import listdir
-# -
-
-df = pd.read_csv('sample_data.csv', encoding='utf-8')
-df.rename(columns={'Värdepapper/beskrivning': 'company'}, inplace=True)
-
-data_apple = df[df.company == 'Apple Inc']
-print(data_apple)
-
-# ### read stock data
-
-# +
-# To create datetime objects 
-import datetime
-
+# import mplfinance as mpl
 # To grab stock data
 import yfinance as fyf
 from pandas_datareader import data as pdr
 fyf.pdr_override() # <-- Here is the fix
 
+# For reading files
+from os import listdir
+
+# +
+# Import data
+avanza_data = pd.read_csv('sample_data.csv', encoding='utf-8')
+
+# Translate to english
+avanza_data.rename(columns={'Datum': 'Date', 
+                            'Konto': 'Account',
+                            'Typ av transaktion': 'Type',
+                            'Värdepapper/beskrivning': 'Company',
+                            'Antal': 'Amount',
+                            'Kurs': 'Price',
+                            'Belopp': 'TotalValueChange',
+                            'Valuta': 'Currency'}, 
+                   inplace=True)
+
+avanza_data.replace({'Type' :
+    {'Sälj': 'Sell',
+     'Köp' : 'Buy',
+     'Utdelning': 'Dividend',
+     'Övrigt' : 'Other'}}, 
+    inplace=True)
+
+# Change date format and add column with numeric date values
+avanza_data['Date'] = pd.to_datetime(avanza_data['Date'], format='%Y/%M/%d').dt.strftime('%Y-%M-%d')
+avanza_data.insert(1, 'DateNum', mdates.date2num(avanza_data['Date']))
+
+# Convert data types from string to numeric
+avanza_data.replace('-', 'NaN', inplace=True)
+avanza_data[['Price', 'TotalValueChange', 'Courtage']] = avanza_data[['Price', 'TotalValueChange', 'Courtage']].apply(pd.to_numeric, errors='coerce')
+print(avanza_data)
+# -
+
+transaction_data = avanza_data.loc[avanza_data['Company'] == 'Boeing Co']
+print(transaction_data)
+
+# ### read stock data
+
 # +
 # Set label
-stocks = ["AAPL"] # If you want to grab multiple stocks add more labels to this list
+stocks = ["BA"] # If you want to grab multiple stocks add more labels to this list
 
 # Set start and end dates
 start = datetime.datetime(2020, 1, 1)
 end   = datetime.datetime(2021, 6, 30)
 
 # Grab data
-data = pdr.get_data_yahoo(stocks, start = start, end = end)
+yahoo_data = pdr.get_data_yahoo(stocks, start = start, end = end)
+
+# Remove space from column names
+yahoo_data.rename(columns={'Adj Close': 'AdjClose'}, inplace=True)
+
+# Change to numeric index and add date columns
+yahoo_data = yahoo_data.reset_index()
+yahoo_data.insert(1, 'DateNum', mdates.date2num(yahoo_data['Date']))
+print(yahoo_data)
+# -
+
+# Merge transaction and Yahoo data frames
+combined_data = yahoo_data.merge(transaction_data, on='DateNum', how='left')
+combined_data.drop(columns='Date_y', inplace=True)
+combined_data.rename(columns={'Date_x': 'Date'}, inplace=True)
+print(combined_data)
+
+# ## Visualization
 
 # +
 ###############################################################################
 #              4a. Visualize Data: Prepare data for Candlestick Chart         #
 ###############################################################################
 # Get Open, High, Low, Close
-ADI_candle   = data.iloc[:, 0:4] # Analog Devices
+ADI_candle = combined_data.iloc[:, [1, 2, 3, 4, 5]] # Analog Devices
 
 # Get dates
-dates = data.index.tolist()
-dates = pd.DataFrame(mdates.date2num(dates), columns = ["Date"], index = data.index)
+# dates = combined_data['DateNum']
 
 # Add dates column to OHLC DataFrames
-ADI_candle = pd.concat([dates, ADI_candle], axis = 1)
+# ADI_candle = pd.concat([dates, ADI_candle], axis = 1)
+# -
+
+# Prepare our data
+x_buy = []
+y_buy = []
+x_sell = []
+y_sell = []
+for (d,v,t) in zip(combined_data['DateNum'], combined_data['Price'], combined_data['Type']):
+    if t == 'Buy':
+#         x_buy.append(mdates.date2num(dt.strptime(d, '%Y/%m/%d')))
+        x_buy.append(d)
+        y_buy.append(float(v))
+    if t == 'Sell':
+#         x_sell.append(mdates.date2num(dt.strptime(d, '%Y/%m/%d')))
+        x_sell.append(d)
+        y_sell.append(float(v))
 
 # +
 ###############################################################################
@@ -97,6 +154,10 @@ candlestick_ohlc(ax, ADI_candle.values.tolist(),
                  width=.6, 
                  colorup='green',
                  colordown='red')
+
+# Plot our data
+ax.plot(x_buy, y_buy, 'bo')
+ax.plot(x_sell, y_sell, 'yo')
 
 # Set x and y axis limits
 ax.set_xlim([start_date, end_date])
@@ -119,15 +180,6 @@ ax.set_axisbelow(True)
 plt.tight_layout()
 
 # -
-
-from datetime import datetime as dt
-x = []
-y = []
-for (d,v) in zip(data_apple.Datum, data_apple.Kurs):
-    x.append(dt.strptime(d, '%Y/%M/%d'))
-    y.append(v)
-ax.plot(x,y, marker='o', linestyle='None', color='blue')
-fig
 
 
 
